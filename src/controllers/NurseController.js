@@ -5,25 +5,27 @@ import { sendError } from "../utils/errorHandler.js";
 const prisma = new PrismaClient();
 
 const USER_SERVICE_URL = process.env.USER_SERVICE_URL || "http://med-core-user-service:3000";
-const DEPARTMENT_SERVICE_URL = process.env.DEPARTMENT_SERVICE_URL || "http://med-core-department-service:3000";
 
 // === VALIDAR ROL ENFERMERO ===
 const validateNurseRole = async (userId) => {
   try {
     const res = await axios.get(`${USER_SERVICE_URL}/api/v1/users/${userId}`);
     if (res.data.role !== "ENFERMERO") {
-      throw new Error("El usuario no tiene rol ENFERMERO");
+      throw new Error(`El usuario ${userId} tiene rol ${res.data.role}, no ENFERMERO`);
     }
     return res.data;
   } catch (err) {
-    throw new Error("Usuario no encontrado o no es enfermero");
+    if (err.response) {
+      throw new Error(`Error en User Service (${err.response.status}): ${err.response.data.message || 'Error desconocido'}`);
+    }
+    throw err;
   }
 };
 
-// === FIND OR CREATE + BULK CREATE ===
+// === BULK CREATE ===
 export const bulkCreateNurse = async (req, res) => {
   try {
-    const { userId, department: deptName, shift = "morning" } = req.body;
+    const { userId, departmentId, shift = "morning" } = req.body;
 
     if (!userId) {
       return res.status(400).json({ message: "userId es obligatorio" });
@@ -42,16 +44,6 @@ export const bulkCreateNurse = async (req, res) => {
       });
     }
 
-    let departmentId = null;
-
-    // === FIND OR CREATE DEPARTMENT ===
-    if (deptName) {
-      const deptRes = await axios.post(`${DEPARTMENT_SERVICE_URL}/api/v1/departments/find-or-create`, {
-        name: deptName,
-      });
-      departmentId = deptRes.data.id;
-    }
-
     // === CREAR ENFERMERO ===
     const nurse = await prisma.nurses.create({
       data: {
@@ -67,7 +59,10 @@ export const bulkCreateNurse = async (req, res) => {
 
   } catch (error) {
     console.error("Error en bulkCreateNurse:", error.message);
-    sendError(error, res);
+    return res.status(500).json({
+      message: "Error interno al crear enfermero",
+      detail: error.message
+    });
   }
 };
 
